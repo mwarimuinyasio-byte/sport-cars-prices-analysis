@@ -13,15 +13,19 @@ st.set_page_config(
 
 
 # ---------------------------------------------------
-# LOAD DATA
+# LOAD AND CLEAN DATA
 # ---------------------------------------------------
 @st.cache_data
 def load_data():
 
     df = pd.read_csv("sports_car_prices.csv")
 
-    # Clean numeric columns
+    # Clean column names
+    df.columns = df.columns.str.strip()
+
+    # Numeric columns
     numeric_columns = [
+        "Year",
         "Engine Size (L)",
         "Horsepower",
         "Torque (lb-ft)",
@@ -29,18 +33,23 @@ def load_data():
         "Price (in USD)"
     ]
 
+    # Convert numeric columns safely
     for column in numeric_columns:
 
-        df[column] = (
-            df[column]
-            .astype(str)
-            .str.replace(",", "", regex=False)
-        )
+        if column in df.columns:
 
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
+            df[column] = (
+                df[column]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace("$", "", regex=False)
+                .str.strip()
+            )
+
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
 
     return df
 
@@ -55,9 +64,9 @@ st.title("Sports Car Price Analysis Dashboard")
 
 st.write(
     """
-    This interactive dashboard analyzes sports car prices and performance.
-    Explore car manufacturers, models, production years, engine sizes,
-    horsepower, torque, acceleration, and prices.
+    This interactive dashboard provides an analysis of sports car prices
+    and performance. Explore manufacturers, models, production years,
+    engine sizes, horsepower, torque, acceleration, and prices.
     """
 )
 
@@ -71,7 +80,11 @@ st.sidebar.header("Dashboard Filters")
 
 
 # Car Make Filter
-car_makes = sorted(df["Car Make"].dropna().unique())
+car_makes = sorted(
+    df["Car Make"]
+    .dropna()
+    .unique()
+)
 
 selected_makes = st.sidebar.multiselect(
     "Select Car Make",
@@ -93,8 +106,10 @@ selected_years = st.sidebar.slider(
 
 
 # Price Filter
-min_price = float(df["Price (in USD)"].min())
-max_price = float(df["Price (in USD)"].max())
+price_data = df["Price (in USD)"].dropna()
+
+min_price = float(price_data.min())
+max_price = float(price_data.max())
 
 selected_price = st.sidebar.slider(
     "Select Price Range (USD)",
@@ -107,16 +122,37 @@ selected_price = st.sidebar.slider(
 # ---------------------------------------------------
 # FILTER DATA
 # ---------------------------------------------------
-filtered_df = df[
-    (df["Car Make"].isin(selected_makes)) &
-    (df["Year"].between(selected_years[0], selected_years[1])) &
-    (
-        df["Price (in USD)"].between(
-            selected_price[0],
-            selected_price[1]
-        )
+filtered_df = df.copy()
+
+filtered_df = filtered_df[
+    filtered_df["Car Make"].isin(selected_makes)
+]
+
+filtered_df = filtered_df[
+    filtered_df["Year"].between(
+        selected_years[0],
+        selected_years[1]
     )
 ]
+
+filtered_df = filtered_df[
+    filtered_df["Price (in USD)"].between(
+        selected_price[0],
+        selected_price[1]
+    )
+]
+
+
+# ---------------------------------------------------
+# HANDLE EMPTY FILTER RESULTS
+# ---------------------------------------------------
+if filtered_df.empty:
+
+    st.warning(
+        "No cars match the selected filters. Please adjust your filters."
+    )
+
+    st.stop()
 
 
 # ---------------------------------------------------
@@ -290,7 +326,7 @@ with tab3:
 
 
 # ---------------------------------------------------
-# STATISTICAL SUMMARY
+# DESCRIPTIVE STATISTICS
 # ---------------------------------------------------
 with tab4:
 
@@ -340,7 +376,9 @@ with col1:
     )
 
     fig_make.update_layout(
-        template="plotly_white"
+        template="plotly_white",
+        xaxis_title="Car Manufacturer",
+        yaxis_title="Number of Cars"
     )
 
     st.plotly_chart(
@@ -352,8 +390,12 @@ with col1:
 # Price Distribution
 with col2:
 
+    price_chart_df = filtered_df.dropna(
+        subset=["Price (in USD)"]
+    )
+
     fig_price_distribution = px.histogram(
-        filtered_df,
+        price_chart_df,
         x="Price (in USD)",
         nbins=30,
         title="Sports Car Price Distribution"
@@ -380,8 +422,15 @@ col1, col2 = st.columns(2)
 # Price by Manufacturer
 with col1:
 
+    price_make_df = filtered_df.dropna(
+        subset=[
+            "Car Make",
+            "Price (in USD)"
+        ]
+    )
+
     fig_price_make = px.box(
-        filtered_df,
+        price_make_df,
         x="Car Make",
         y="Price (in USD)",
         title="Sports Car Prices by Manufacturer",
@@ -403,8 +452,12 @@ with col1:
 # Horsepower Distribution
 with col2:
 
+    horsepower_df = filtered_df.dropna(
+        subset=["Horsepower"]
+    )
+
     fig_horsepower = px.histogram(
-        filtered_df,
+        horsepower_df,
         x="Horsepower",
         nbins=30,
         title="Horsepower Distribution"
@@ -431,13 +484,21 @@ col1, col2 = st.columns(2)
 # Price vs Horsepower
 with col1:
 
+    horsepower_price_df = filtered_df.dropna(
+        subset=[
+            "Horsepower",
+            "Price (in USD)",
+            "Car Make"
+        ]
+    )
+
     fig_price_hp = px.scatter(
-        filtered_df,
+        horsepower_price_df,
         x="Horsepower",
         y="Price (in USD)",
         color="Car Make",
+        hover_name="Car Model",
         hover_data=[
-            "Car Model",
             "Year",
             "Engine Size (L)",
             "Torque (lb-ft)",
@@ -447,7 +508,9 @@ with col1:
     )
 
     fig_price_hp.update_layout(
-        template="plotly_white"
+        template="plotly_white",
+        xaxis_title="Horsepower",
+        yaxis_title="Price (USD)"
     )
 
     st.plotly_chart(
@@ -459,21 +522,32 @@ with col1:
 # Engine Size vs Price
 with col2:
 
+    engine_price_df = filtered_df.dropna(
+        subset=[
+            "Engine Size (L)",
+            "Price (in USD)",
+            "Car Make"
+        ]
+    )
+
     fig_engine_price = px.scatter(
-        filtered_df,
+        engine_price_df,
         x="Engine Size (L)",
         y="Price (in USD)",
         color="Car Make",
+        hover_name="Car Model",
         hover_data=[
-            "Car Model",
             "Year",
-            "Horsepower"
+            "Horsepower",
+            "Torque (lb-ft)"
         ],
         title="Engine Size vs Sports Car Price"
     )
 
     fig_engine_price.update_layout(
-        template="plotly_white"
+        template="plotly_white",
+        xaxis_title="Engine Size (L)",
+        yaxis_title="Price (USD)"
     )
 
     st.plotly_chart(
@@ -488,23 +562,34 @@ with col2:
 col1, col2 = st.columns(2)
 
 
-# Price vs Year
+# Production Year vs Price
 with col1:
 
+    year_price_df = filtered_df.dropna(
+        subset=[
+            "Year",
+            "Price (in USD)",
+            "Car Make"
+        ]
+    )
+
     fig_year_price = px.scatter(
-        filtered_df,
+        year_price_df,
         x="Year",
         y="Price (in USD)",
         color="Car Make",
+        hover_name="Car Model",
         hover_data=[
-            "Car Model",
-            "Horsepower"
+            "Horsepower",
+            "Engine Size (L)"
         ],
-        title="Production Year vs Price"
+        title="Production Year vs Sports Car Price"
     )
 
     fig_year_price.update_layout(
-        template="plotly_white"
+        template="plotly_white",
+        xaxis_title="Production Year",
+        yaxis_title="Price (USD)"
     )
 
     st.plotly_chart(
@@ -516,8 +601,12 @@ with col1:
 # 0-60 Time Distribution
 with col2:
 
+    acceleration_distribution_df = filtered_df.dropna(
+        subset=["0-60 MPH Time (seconds)"]
+    )
+
     fig_acceleration = px.histogram(
-        filtered_df,
+        acceleration_distribution_df,
         x="0-60 MPH Time (seconds)",
         nbins=20,
         title="0-60 MPH Acceleration Distribution"
@@ -538,24 +627,41 @@ with col2:
 # ---------------------------------------------------
 # PRICE VS ACCELERATION
 # ---------------------------------------------------
+st.divider()
+
 st.subheader("Price vs Acceleration")
 
+acceleration_df = filtered_df.dropna(
+    subset=[
+        "0-60 MPH Time (seconds)",
+        "Price (in USD)",
+        "Car Make",
+        "Car Model"
+    ]
+)
+
+# No size parameter is used here.
+# This prevents Plotly bubble size validation errors.
+
 fig_price_acceleration = px.scatter(
-    filtered_df,
+    acceleration_df,
     x="0-60 MPH Time (seconds)",
     y="Price (in USD)",
     color="Car Make",
-    size="Horsepower",
+    hover_name="Car Model",
     hover_data=[
-        "Car Model",
         "Year",
-        "Engine Size (L)"
+        "Engine Size (L)",
+        "Horsepower",
+        "Torque (lb-ft)"
     ],
     title="Sports Car Price vs 0-60 MPH Time"
 )
 
 fig_price_acceleration.update_layout(
-    template="plotly_white"
+    template="plotly_white",
+    xaxis_title="0-60 MPH Time (Seconds)",
+    yaxis_title="Price (USD)"
 )
 
 st.plotly_chart(
@@ -605,6 +711,10 @@ manufacturer_summary = (
 )
 
 
+# Round numeric values
+manufacturer_summary = manufacturer_summary.round(2)
+
+
 st.dataframe(
     manufacturer_summary,
     use_container_width=True
@@ -614,8 +724,12 @@ st.dataframe(
 # ---------------------------------------------------
 # AVERAGE PRICE BY MANUFACTURER
 # ---------------------------------------------------
+average_price_df = manufacturer_summary.dropna(
+    subset=["Average_Price"]
+)
+
 fig_average_price = px.bar(
-    manufacturer_summary,
+    average_price_df,
     x="Car Make",
     y="Average_Price",
     title="Average Sports Car Price by Manufacturer",
@@ -624,6 +738,7 @@ fig_average_price = px.bar(
 
 fig_average_price.update_layout(
     template="plotly_white",
+    xaxis_title="Car Manufacturer",
     yaxis_title="Average Price (USD)"
 )
 
@@ -636,8 +751,12 @@ st.plotly_chart(
 # ---------------------------------------------------
 # AVERAGE HORSEPOWER BY MANUFACTURER
 # ---------------------------------------------------
+average_hp_df = manufacturer_summary.dropna(
+    subset=["Average_Horsepower"]
+)
+
 fig_average_hp = px.bar(
-    manufacturer_summary,
+    average_hp_df,
     x="Car Make",
     y="Average_Horsepower",
     title="Average Horsepower by Manufacturer",
@@ -646,6 +765,7 @@ fig_average_hp = px.bar(
 
 fig_average_hp.update_layout(
     template="plotly_white",
+    xaxis_title="Car Manufacturer",
     yaxis_title="Average Horsepower"
 )
 
@@ -665,6 +785,7 @@ st.header("Top 10 Most Expensive Sports Cars")
 
 top_expensive_cars = (
     filtered_df
+    .dropna(subset=["Price (in USD)"])
     .sort_values(
         by="Price (in USD)",
         ascending=False
@@ -684,11 +805,18 @@ fig_top_expensive = px.bar(
     x="Car Model",
     y="Price (in USD)",
     color="Car Make",
+    hover_data=[
+        "Year",
+        "Horsepower",
+        "Engine Size (L)"
+    ],
     title="Top 10 Most Expensive Sports Cars"
 )
 
 fig_top_expensive.update_layout(
-    template="plotly_white"
+    template="plotly_white",
+    xaxis_title="Car Model",
+    yaxis_title="Price (USD)"
 )
 
 st.plotly_chart(
